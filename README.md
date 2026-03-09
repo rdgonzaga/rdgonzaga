@@ -9,7 +9,7 @@ I am a sophomore at De La Salle University Manila, pursuing a BS in Computer Sci
 </p>
 
 <p align="center">
-  <img src="https://github-readme-stats-topaz-zeta-33.vercel.app/api/top-langs/?username=rdgonzaga&theme=github_dark&layout=compact&card_width=500&exclude_repo=github-readme-streak-stats" />
+  <img src="https://github-readme-stats-topaz-zeta-33.vercel.app/api/top-langs/?username=rdgonzaga&theme=github_dark&layout=compact&card_width=500&exclude_repo=github-readme-streak-stats&hide=jupyter%20notebook" />
 </p>
 
 <p align="center">
