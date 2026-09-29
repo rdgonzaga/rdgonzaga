@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="176" viewBox="0 0 420 176" role="img" aria-label="f1-prediction: predicts F1 race results right after qualifying. Built with python · xgboost."><style>
+text{font-family:'JetBrains Mono', ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;white-space:pre}
+.in{opacity:0;animation:in .3s ease-out forwards}
+.grow{transform-box:fill-box;transform-origin:left;transform:scaleX(0);animation:grow .7s cubic-bezier(.2,.7,.2,1) forwards}
+.cover{transform-box:fill-box;transform-origin:right;animation-fill-mode:forwards;animation-name:type}
+.blink{animation:blink 1.06s steps(1) infinite}
+@keyframes in{to{opacity:1}}
+@keyframes grow{to{transform:scaleX(1)}}
+@keyframes type{to{transform:scaleX(0)}}
+@keyframes blink{50%{opacity:0}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}.in{opacity:1}.grow{transform:none}.cover{display:none}}
+</style>
+<rect width="420" height="176" fill="#0a0c0f"/>
+<rect x="14" y="14" width="392" height="148" rx="6" fill="none" stroke="#2a3038"/><rect x="28" y="6" width="133" height="16" fill="#0a0c0f"/><text x="36" y="18.5" fill="#4ade80" font-size="13" font-weight="600"> f1-prediction </text><rect x="360" y="6" width="32" height="16" fill="#0a0c0f"/><text x="384" y="18.5" text-anchor="end" fill="#6b737d" font-size="13">ml</text><text x="34.0" y="58" textLength="185.7" lengthAdjust="spacing" font-size="13"><tspan fill="#4ade80">$ </tspan><tspan fill="#6b737d">./f1-prediction --about</tspan></text><rect class="cover" x="47.9" y="45" width="174.9" height="19" fill="#0a0c0f" style="animation-duration:0.81s;animation-timing-function:steps(23);animation-delay:1.20s"/><text class="in" style="animation-delay:2.21s" x="34" y="88" fill="#eceef1" font-size="16">predicts F1 race results</text><text class="in" style="animation-delay:2.33s" x="34" y="112" fill="#eceef1" font-size="16">right after qualifying</text><text class="in" style="animation-delay:2.54s" x="34" y="144" fill="#6b737d" font-size="12.5"># python · xgboost</text><text class="in" style="animation-delay:2.65s" x="386" y="144" text-anchor="end" fill="#4ade80" font-size="14">→</text>
+</svg>
