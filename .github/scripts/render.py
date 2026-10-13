@@ -385,9 +385,16 @@ def parse_music(recent, info, now):
     }
 
 
-def lastfm(key, method):
+def parse_top(data):
+    artists = data["topartists"]["artist"]
+    if isinstance(artists, dict):
+        artists = [artists]
+    return [(a["name"], int(a["playcount"])) for a in artists[:3]]
+
+
+def lastfm(key, method, **params):
     q = urllib.parse.urlencode({"method": method, "user": LASTFM_USER, "api_key": key,
-                                "format": "json", "limit": 1})
+                                "format": "json", "limit": 1, **params})
     with urllib.request.urlopen(f"https://ws.audioscrobbler.com/2.0/?{q}", timeout=20) as resp:
         out = json.load(resp)
     if "error" in out:
@@ -414,11 +421,12 @@ def fetch_music(key):
                     datetime.now(timezone.utc))
     if m:
         m["art"] = fetch_art(m["art"])
+        m["top"] = parse_top(lastfm(key, "user.gettopartists", period="7day", limit=3))
     return m
 
 
 def render_music(m):
-    W, H, X, A = 840, 188, 182, 120  # A: art size, X: text column
+    W, H, X, A, R = 840, 188, 182, 120, 580  # A: art size, X: track column, R: this-week column
     body = pane(W, H, " now playing " if m["playing"] else " last played ", "last.fm")
 
     # art (or a placeholder) fades in first, then the command types beside it
@@ -438,10 +446,10 @@ def render_music(m):
                   prefix=f'<tspan fill="{GREEN}">$ </tspan>', prefix_len=2)
     t += len(cmd) * 0.035 + 0.2
 
-    lines = [(92, 20, TEXT, ' font-weight="600"', clip(m["track"], 50)),
-             (116, 15, BODY, "", clip(m["artist"].lower(), 66))]
+    lines = [(92, 20, TEXT, ' font-weight="600"', clip(m["track"], 30)),
+             (116, 15, BODY, "", clip(m["artist"].lower(), 40))]
     if m["album"]:
-        lines.append((138, 13.5, MUTED, "", "# " + clip(m["album"].lower(), 70)))
+        lines.append((138, 13.5, MUTED, "", "# " + clip(m["album"].lower(), 44)))
     for i, (y, size, fill, extra, text) in enumerate(lines):
         body += (f'<text class="in" {at(t + i * 0.12)} x="{X}" y="{y}" fill="{fill}" '
                  f'font-size="{size}"{extra}>{escape(text)}</text>')
@@ -461,10 +469,24 @@ def render_music(m):
     else:
         body += f'<text class="in" {at(t)} x="{X}" y="160" fill="{MUTED}" font-size="13">{m["ago"]}  ·  {count}</text>'
 
+    # this week's top artists share the pane instead of adding another card
+    body += f'<line class="in" {at(0.4)} x1="{R - 20}" y1="40" x2="{R - 20}" y2="160" stroke="{LINE}"/>'
+    body += f'<text class="in" {at(0.5)} x="{R}" y="58" fill="{MUTED}" font-size="13"># top this week</text>'
+    for i, (name, plays) in enumerate(m["top"]):
+        y, d = 92 + i * 24, 0.9 + i * 0.12
+        body += (f'<g class="in" {at(d)}><text x="{R}" y="{y}" fill="{MUTED}" font-size="14">{i + 1}</text>'
+                 f'<text x="{R + 20}" y="{y}" fill="{BODY}" font-size="14">{escape(clip(name.lower(), 18))}</text>'
+                 f'<text x="{W - 34}" y="{y}" text-anchor="end" fill="{TEXT}" font-size="14" font-weight="600">{plays}</text></g>')
+    if not m["top"]:
+        body += f'<text class="in" {at(0.9)} x="{R}" y="92" fill="{MUTED}" font-size="14">nothing yet</text>'
+
     verb = "Now playing" if m["playing"] else "Last played"
     label = f'{verb} on Spotify: {m["track"]} by {m["artist"]}'
     label += f', from {m["album"]}' if m["album"] else ""
-    write_svg("music.svg", W, H, f"{label}. {m['scrobbles']:,} scrobbles.", body)
+    label += f". {m['scrobbles']:,} scrobbles."
+    if m["top"]:
+        label += " Top this week: " + ", ".join(n for n, _ in m["top"]) + "."
+    write_svg("music.svg", W, H, label, body)
 
 
 if __name__ == "__main__":
