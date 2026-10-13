@@ -131,6 +131,51 @@ class Render(unittest.TestCase):
         self.assertIn(">" + "y" * 17 + "…</text>", s)
 
 
+class Live(unittest.TestCase):
+    M = {"track": "Better Together", "artist": "Jack Johnson", "album": "In Between Dreams",
+         "playing": False, "ago": "11h ago", "scrobbles": 111507, "art": None, "top": []}
+
+    def test_music_svg_returns_markup_without_writing(self):
+        with tempfile.TemporaryDirectory() as d:
+            old, render.ASSETS = render.ASSETS, Path(d)
+            try:
+                out = render.music_svg(self.M)
+            finally:
+                render.ASSETS = old
+            self.assertTrue(out.startswith("<svg"))
+            self.assertIn("Better Together", out)
+            self.assertEqual(list(Path(d).iterdir()), [])
+
+    def live(self, fetch):
+        old, render.fetch_music = render.fetch_music, fetch
+        try:
+            return render.live_music("key")
+        finally:
+            render.fetch_music = old
+
+    def test_live_ok_caches_a_minute(self):
+        body, ttl = self.live(lambda key: dict(self.M))
+        self.assertIn("Better Together", body)
+        self.assertEqual(ttl, 60)
+
+    def test_live_failure_serves_offline_card_briefly(self):
+        def boom(key):
+            raise OSError("last.fm down")
+        body, ttl = self.live(boom)
+        self.assertIn("taking a nap", body)
+        self.assertEqual(ttl, 10)
+
+    def test_live_without_key_or_scrobbles(self):
+        self.assertIn("taking a nap", render.live_music(None)[0])
+        self.assertIn("taking a nap", self.live(lambda key: None)[0])
+
+    def test_offline_card(self):
+        out = render.music_offline_svg()
+        self.assertTrue(out.startswith("<svg"))
+        self.assertIn("last.fm is taking a nap", out)
+        self.assertIn('width="840" height="188"', out)
+
+
 class Top(unittest.TestCase):
     def test_parse_top(self):
         data = {"topartists": {"artist": [{"name": "She & Him", "playcount": "42"},

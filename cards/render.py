@@ -4,7 +4,7 @@ Static panes (hero, projects, stack) come from the data below. The stats pane
 pulls numbers from the GitHub GraphQL API and the music pane pulls the last
 played track from Last.fm; each is skipped when its key isn't set. Pass
 `static`, `stats` or `music` to render only those.
-Run: STATS_TOKEN=$(gh auth token) LASTFM_API_KEY=... python .github/scripts/render.py
+Run: STATS_TOKEN=$(gh auth token) LASTFM_API_KEY=... python cards/render.py
 
 Animations are CSS so they switch off under prefers-reduced-motion; everything
 plays once on load except the cursor blink.
@@ -22,7 +22,7 @@ from pathlib import Path
 USER = "rdgonzaga"
 LASTFM_USER = "Reniaaar"
 LASTFM_PLACEHOLDER = "2a96cbd8b46e442fc41c2b86b821562f"  # Last.fm's grey star "no art" image
-ASSETS = Path(__file__).resolve().parents[2] / "assets"
+ASSETS = Path(__file__).resolve().parents[1] / "assets"
 
 BG, LINE, TEXT, BODY, MUTED, GREEN, SHADOW = (
     "#0a0c0f", "#2a3038", "#eceef1", "#c3c8ce", "#6b737d", "#4ade80", "#1d4d33")
@@ -110,13 +110,16 @@ def pane(W, H, title, right=None, x0=0, inset=14):
     return "".join(parts)
 
 
+def svg(W, H, label, body):
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}" '
+            f'role="img" aria-label="{escape(label)}">{STYLE}\n<rect width="{W}" height="{H}" fill="{BG}"/>\n'
+            f'{body}\n</svg>\n')
+
+
 def write_svg(name, W, H, label, body):
     path = ASSETS / name
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}" '
-        f'role="img" aria-label="{escape(label)}">{STYLE}\n<rect width="{W}" height="{H}" fill="{BG}"/>\n'
-        f'{body}\n</svg>\n', encoding="utf-8")
+    path.write_text(svg(W, H, label, body), encoding="utf-8")
 
 
 def cursor(x, y, delay):
@@ -425,7 +428,8 @@ def fetch_music(key):
     return m
 
 
-def render_music(m):
+def music_svg(m):
+    """The card as markup; api/music.py serves this live."""
     W, H, X, A, R = 840, 188, 182, 120, 580  # A: art size, X: track column, R: this-week column
     body = pane(W, H, " now playing " if m["playing"] else " last played ", "last.fm")
 
@@ -486,7 +490,34 @@ def render_music(m):
     label += f". {m['scrobbles']:,} scrobbles."
     if m["top"]:
         label += " Top this week: " + ", ".join(n for n, _ in m["top"]) + "."
-    write_svg("music.svg", W, H, label, body)
+    return svg(W, H, label, body)
+
+
+def music_offline_svg():
+    """Shown by the live endpoint when Last.fm can't be reached."""
+    W, H = 840, 188
+    body = pane(W, H, " last played ", "last.fm")
+    body += typed(34, 58, "nowplaying --last", 0.4, per=0.035, size=13, fill=MUTED,
+                  prefix=f'<tspan fill="{GREEN}">$ </tspan>', prefix_len=2)
+    body += (f'<text class="in" {at(1.2)} x="34" y="92" fill="{BODY}" font-size="15">'
+             f'# last.fm is taking a nap, back soon</text>')
+    return svg(W, H, "Last played on Spotify: Last.fm is unavailable right now.", body)
+
+
+def live_music(key):
+    """(svg, seconds Vercel's CDN may cache it). Failures get a short TTL so
+    the real card comes back soon after Last.fm does."""
+    try:
+        m = fetch_music(key) if key else None
+    except Exception as e:  # any failure should still produce an image, not a 500
+        print(f"last.fm failed: {e!r}")
+        m = None
+    return (music_svg(m), 60) if m else (music_offline_svg(), 10)
+
+
+def render_music(m):
+    ASSETS.mkdir(parents=True, exist_ok=True)
+    (ASSETS / "music.svg").write_text(music_svg(m), encoding="utf-8")
 
 
 if __name__ == "__main__":
