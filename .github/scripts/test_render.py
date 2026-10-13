@@ -76,7 +76,8 @@ class Render(unittest.TestCase):
 
     def svg(self, **kw):
         m = {"track": "Better Together", "artist": "Jack Johnson", "album": "In Between Dreams",
-             "playing": False, "ago": "11h ago", "scrobbles": 111507, "art": None}
+             "playing": False, "ago": "11h ago", "scrobbles": 111507, "art": None,
+             "top": [("She & Him", 42), ("Clairo", 31), ("Men I Trust", 18)]}
         m.update(kw)
         render.render_music(m)
         return (render.ASSETS / "music.svg").read_text(encoding="utf-8")
@@ -110,7 +111,40 @@ class Render(unittest.TestCase):
     def test_long_title_clipped(self):
         s = self.svg(track="x" * 200)
         # visible line is cut; the aria-label keeps the full title on purpose
-        self.assertIn(">" + "x" * 49 + "…</text>", s)
+        self.assertIn(">" + "x" * 29 + "…</text>", s)
+
+    def test_top_artists_column(self):
+        s = self.svg()
+        self.assertIn("# top this week", s)
+        self.assertIn("she &amp; him", s)
+        self.assertIn(">42</text>", s)
+        self.assertIn("men i trust", s)
+        self.assertIn("Top this week: She &amp; Him, Clairo, Men I Trust", s)  # aria-label
+
+    def test_top_artists_empty(self):
+        s = self.svg(top=[])
+        self.assertIn("nothing yet", s)
+        self.assertNotIn("Top this week:", s)
+
+    def test_long_artist_in_top_clipped(self):
+        s = self.svg(top=[("y" * 40, 5)])
+        self.assertIn(">" + "y" * 17 + "…</text>", s)
+
+
+class Top(unittest.TestCase):
+    def test_parse_top(self):
+        data = {"topartists": {"artist": [{"name": "She & Him", "playcount": "42"},
+                                          {"name": "Clairo", "playcount": "31"}]}}
+        self.assertEqual(render.parse_top(data), [("She & Him", 42), ("Clairo", 31)])
+
+    def test_parse_top_single_dict_and_empty(self):
+        one = {"topartists": {"artist": {"name": "Clairo", "playcount": "3"}}}
+        self.assertEqual(render.parse_top(one), [("Clairo", 3)])
+        self.assertEqual(render.parse_top({"topartists": {"artist": []}}), [])
+
+    def test_parse_top_caps_at_three(self):
+        data = {"topartists": {"artist": [{"name": str(i), "playcount": "1"} for i in range(5)]}}
+        self.assertEqual(len(render.parse_top(data)), 3)
 
 
 class Art(unittest.TestCase):
