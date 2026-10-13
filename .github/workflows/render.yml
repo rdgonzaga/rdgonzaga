@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: [".github/scripts/render.py"]
+    paths: [".github/scripts/render.py", ".github/workflows/render.yml"]
 
 permissions:
   contents: write
@@ -25,14 +25,18 @@ jobs:
         env:
           STATS_TOKEN: ${{ secrets.STATS_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Commit if changed
+      # stats.svg lives on an orphan `output` branch that's force-pushed as a
+      # single commit, so refreshes never pile up in main's history
+      - name: Publish stats to output branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git add assets
-          if git diff --cached --quiet; then
-            echo "No changes"
-            exit 0
-          fi
+          out=$(mktemp -d)
+          cp assets/stats.svg "$out/"
+          cd "$out"
+          git init -q -b output
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore: refresh profile stats"
-          git push
+          git add stats.svg
+          git commit -q -m "chore: refresh profile stats"
+          git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" output
