@@ -13,6 +13,7 @@ import base64
 import json
 import os
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
@@ -398,7 +399,14 @@ def parse_top(data):
 def lastfm(key, method, **params):
     q = urllib.parse.urlencode({"method": method, "user": LASTFM_USER, "api_key": key,
                                 "format": "json", "limit": 1, **params})
-    with urllib.request.urlopen(f"https://ws.audioscrobbler.com/2.0/?{q}", timeout=20) as resp:
+    url = f"https://ws.audioscrobbler.com/2.0/?{q}"
+    try:
+        resp = urllib.request.urlopen(url, timeout=20)
+    except urllib.error.HTTPError as e:
+        if e.code < 500:
+            raise
+        resp = urllib.request.urlopen(url, timeout=20)  # Last.fm throws the odd 500; one retry clears most
+    with resp:
         out = json.load(resp)
     if "error" in out:
         raise RuntimeError(out.get("message", out["error"]))
