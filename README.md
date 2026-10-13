@@ -4,5 +4,6 @@
 <a href="https://github.com/rdgonzaga/f1-prediction"><img src="./assets/projects/f1-prediction.svg" alt="F1 Prediction: predicts F1 race results right after qualifying" width="50%" /></a><a href="https://github.com/rdgonzaga/f1-game-telemetry"><img src="./assets/projects/f1-telemetry.svg" alt="F1 Telemetry: live telemetry dashboard for F1 25: 2026 Season Pack" width="50%" /></a><br>
 <img src="./assets/stack.svg" alt="Stack: security, backend and frontend tools" width="100%" /><br>
 <img src="https://raw.githubusercontent.com/rdgonzaga/rdgonzaga/output/stats.svg" alt="GitHub stats, streak and most used languages" width="100%" /><br>
+<a href="https://www.last.fm/user/Reniaaar"><img src="https://raw.githubusercontent.com/rdgonzaga/rdgonzaga/output/music.svg" alt="Last played on Spotify" width="100%" /></a><br>
 <a href="https://www.raigon.dev"><img src="./assets/contact/web.svg" alt="Website: raigon.dev" width="33.333%" /></a><a href="mailto:rainerdgonzaga@gmail.com"><img src="./assets/contact/mail.svg" alt="Email: rainerdgonzaga@gmail.com" width="33.333%" /></a><a href="https://www.linkedin.com/in/rdgonzaga/"><img src="./assets/contact/linkedin.svg" alt="LinkedIn: in/rdgonzaga" width="33.333%" /></a>
 </p>
