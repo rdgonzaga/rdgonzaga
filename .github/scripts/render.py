@@ -1,8 +1,10 @@
 """Render every SVG pane in assets/ for the profile README.
 
 Static panes (hero, projects, stack) come from the data below. The stats pane
-pulls numbers from the GitHub GraphQL API and is skipped when no token is set.
-Run: STATS_TOKEN=$(gh auth token) python .github/scripts/render.py
+pulls numbers from the GitHub GraphQL API and the music pane pulls the last
+played track from Last.fm; each is skipped when its key isn't set. Pass
+`static`, `stats` or `music` to render only those.
+Run: STATS_TOKEN=$(gh auth token) LASTFM_API_KEY=... python .github/scripts/render.py
 
 Animations are CSS so they switch off under prefers-reduced-motion; everything
 plays once on load except the cursor blink.
@@ -383,13 +385,105 @@ def parse_music(recent, info, now):
     }
 
 
-if __name__ == "__main__":
-    render_hero()
-    render_projects()
-    render_stack()
-    render_contact()
-    token = os.environ.get("STATS_TOKEN") or os.environ.get("GITHUB_TOKEN")
-    if token:
-        render_stats(fetch_stats(token))
+def lastfm(key, method):
+    q = urllib.parse.urlencode({"method": method, "user": LASTFM_USER, "api_key": key,
+                                "format": "json", "limit": 1})
+    with urllib.request.urlopen(f"https://ws.audioscrobbler.com/2.0/?{q}", timeout=20) as resp:
+        out = json.load(resp)
+    if "error" in out:
+        raise RuntimeError(out.get("message", out["error"]))
+    return out
+
+
+def fetch_art(url):
+    """Album art inlined as a data URI; camo won't load external images inside an SVG."""
+    if not url:
+        return None
+    try:
+        with urllib.request.urlopen(url, timeout=20) as resp:
+            kind = resp.headers.get_content_type()
+            data = resp.read()
+    except OSError as e:
+        print(f"album art skipped: {e}")
+        return None
+    return f"data:{kind};base64,{base64.b64encode(data).decode()}"
+
+
+def fetch_music(key):
+    m = parse_music(lastfm(key, "user.getrecenttracks"), lastfm(key, "user.getinfo"),
+                    datetime.now(timezone.utc))
+    if m:
+        m["art"] = fetch_art(m["art"])
+    return m
+
+
+def render_music(m):
+    W, H, X, A = 840, 188, 182, 120  # A: art size, X: text column
+    body = pane(W, H, " now playing " if m["playing"] else " last played ", "last.fm")
+
+    # art (or a placeholder) fades in first, then the command types beside it
+    body += f'<g class="in" {at(0.3)}>'
+    if m["art"]:
+        body += (f'<clipPath id="art"><rect x="34" y="40" width="{A}" height="{A}" rx="4"/></clipPath>'
+                 f'<image href="{m["art"]}" x="34" y="40" width="{A}" height="{A}" '
+                 f'preserveAspectRatio="xMidYMid slice" clip-path="url(#art)"/>')
     else:
-        print("no STATS_TOKEN/GITHUB_TOKEN set, skipped stats.svg")
+        body += (f'<rect x="34" y="40" width="{A}" height="{A}" rx="4" fill="{HEAT[0]}"/>'
+                 f'<text x="{34 + A / 2}" y="{40 + A / 2 + 14}" text-anchor="middle" fill="{MUTED}" font-size="40">♪</text>')
+    body += f'<rect x="34" y="40" width="{A}" height="{A}" rx="4" fill="none" stroke="{LINE}"/></g>'
+
+    t = 0.5
+    cmd = "nowplaying --last"
+    body += typed(X, 58, cmd, t, per=0.035, size=13, fill=MUTED,
+                  prefix=f'<tspan fill="{GREEN}">$ </tspan>', prefix_len=2)
+    t += len(cmd) * 0.035 + 0.2
+
+    lines = [(92, 20, TEXT, ' font-weight="600"', clip(m["track"], 50)),
+             (116, 15, BODY, "", clip(m["artist"].lower(), 66))]
+    if m["album"]:
+        lines.append((138, 13.5, MUTED, "", "# " + clip(m["album"].lower(), 70)))
+    for i, (y, size, fill, extra, text) in enumerate(lines):
+        body += (f'<text class="in" {at(t + i * 0.12)} x="{X}" y="{y}" fill="{fill}" '
+                 f'font-size="{size}"{extra}>{escape(text)}</text>')
+    t += len(lines) * 0.12 + 0.1
+
+    # footer: equalizer bars while playing, otherwise how long ago
+    count = f'{m["scrobbles"]:,} scrobbles'
+    if m["playing"]:
+        body += ('<style>.eq{transform-box:fill-box;transform-origin:bottom;'
+                 'animation:eq .9s ease-in-out infinite alternate}'
+                 '@keyframes eq{from{transform:scaleY(.25)}to{transform:scaleY(1)}}</style>')
+        body += f'<g class="in" {at(t)}>'
+        for i, d in enumerate((0, .3, .15, .45)):
+            body += (f'<rect class="eq" style="animation-delay:{d}s" x="{X + i * 5}" y="148" '
+                     f'width="3" height="12" rx="1" fill="{GREEN}"/>')
+        body += f'<text x="{X + 30}" y="160" fill="{MUTED}" font-size="13">· {count}</text></g>'
+    else:
+        body += f'<text class="in" {at(t)} x="{X}" y="160" fill="{MUTED}" font-size="13">{m["ago"]}  ·  {count}</text>'
+
+    verb = "Now playing" if m["playing"] else "Last played"
+    label = f'{verb} on Spotify: {m["track"]} by {m["artist"]}'
+    label += f', from {m["album"]}' if m["album"] else ""
+    write_svg("music.svg", W, H, f"{label}. {m['scrobbles']:,} scrobbles.", body)
+
+
+if __name__ == "__main__":
+    targets = sys.argv[1:] or ["static", "stats", "music"]
+    if "static" in targets:
+        render_hero()
+        render_projects()
+        render_stack()
+        render_contact()
+    if "stats" in targets:
+        token = os.environ.get("STATS_TOKEN") or os.environ.get("GITHUB_TOKEN")
+        if token:
+            render_stats(fetch_stats(token))
+        else:
+            print("no STATS_TOKEN/GITHUB_TOKEN set, skipped stats.svg")
+    if "music" in targets:
+        key = os.environ.get("LASTFM_API_KEY")
+        music = fetch_music(key) if key else None
+        if music:
+            render_music(music)
+        else:
+            print("no LASTFM_API_KEY or no scrobbles yet, skipped music.svg")
