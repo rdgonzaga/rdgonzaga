@@ -50,8 +50,16 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           out=$(mktemp -d)
-          if git fetch -q --depth=1 origin output; then
+          # exit 2 means the branch doesn't exist yet; anything else is a real
+          # error, and pushing from an empty dir then would drop the other card
+          found=0
+          git ls-remote --exit-code --heads origin output > /dev/null || found=$?
+          if [ "$found" = 0 ]; then
+            git fetch -q --depth=1 origin output
             git archive FETCH_HEAD | tar -x -C "$out"
+          elif [ "$found" != 2 ]; then
+            echo "Couldn't read the output branch"
+            exit 1
           fi
           fresh=0
           for f in stats music; do
