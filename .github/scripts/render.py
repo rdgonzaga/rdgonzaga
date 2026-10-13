@@ -7,14 +7,19 @@ Run: STATS_TOKEN=$(gh auth token) python .github/scripts/render.py
 Animations are CSS so they switch off under prefers-reduced-motion; everything
 plays once on load except the cursor blink.
 """
+import base64
 import json
 import os
+import sys
+import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from html import escape
 from pathlib import Path
 
 USER = "rdgonzaga"
+LASTFM_USER = "Reniaaar"
+LASTFM_PLACEHOLDER = "2a96cbd8b46e442fc41c2b86b821562f"  # Last.fm's grey star "no art" image
 ASSETS = Path(__file__).resolve().parents[2] / "assets"
 
 BG, LINE, TEXT, BODY, MUTED, GREEN, SHADOW = (
@@ -338,6 +343,44 @@ def render_stats(s):
              f"Current streak {s['current']} days, longest {s['longest']} days. Languages: "
              + ", ".join(f"{n} {p:.0f}%" for n, p, _ in s["langs"]) + f". Synced {s['synced']}.")
     write_svg("stats.svg", W, H, label, body)
+
+
+# ---------- last played from Last.fm ----------
+
+def ago(delta):
+    m = int(delta.total_seconds() // 60)
+    if m < 1:
+        return "just now"
+    if m < 60:
+        return f"{m}m ago"
+    if m < 60 * 24:
+        return f"{m // 60}h ago"
+    return f"{m // (60 * 24)}d ago"
+
+
+def clip(text, n):
+    return text if len(text) <= n else text[:n - 1].rstrip() + "…"
+
+
+def parse_music(recent, info, now):
+    tracks = recent["recenttracks"]["track"]
+    if isinstance(tracks, dict):  # Last.fm collapses a one-item list into an object
+        tracks = [tracks]
+    if not tracks:
+        return None
+    # while something is playing it comes first, ahead of the last finished track
+    t = tracks[0]
+    playing = t.get("@attr", {}).get("nowplaying") == "true"
+    art = next((i["#text"] for i in t.get("image", []) if i["size"] == "extralarge"), "")
+    return {
+        "track": t["name"],
+        "artist": t["artist"]["#text"],
+        "album": t["album"]["#text"],
+        "playing": playing,
+        "ago": None if playing else ago(now - datetime.fromtimestamp(int(t["date"]["uts"]), timezone.utc)),
+        "scrobbles": int(info["user"]["playcount"]),
+        "art": art if art and LASTFM_PLACEHOLDER not in art else None,
+    }
 
 
 if __name__ == "__main__":
