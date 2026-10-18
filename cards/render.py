@@ -48,12 +48,13 @@ PROJECTS = [
     ("promptpatrol", "security", ["finds security holes in", "AI-generated web apps"], "python · sast · dast"),
     ("archerbytes", "backend", ["knowledge-sharing platform", "for 20,000+ DLSU students"], "next.js · postgresql · drizzle"),
     ("f1-prediction", "ml", ["predicts F1 race results", "right after qualifying"], "python · xgboost"),
-    ("f1-telemetry", "tooling", ["live telemetry dashboard for", "F1 25: 2026 Season Pack"], "python · fastapi · react"),
+    ("resole", "full-stack", ["AI-graded peer-to-peer", "marketplace for footwear"], "next.js · expo · supabase · gemini"),
 ]
 STACK = [
-    ("security", "kali · nmap · burp suite · metasploit · wireshark"),
-    ("backend", "python · node · java · fastapi · postgresql"),
-    ("frontend", "typescript · react · next.js · tailwind"),
+    ("languages", "python · typescript · java · c"),
+    ("backend", "node · express · next.js · fastapi"),
+    ("frontend", "react · next.js · react native · tailwind"),
+    ("security", "kali · wireshark · nmap · burp suite · metasploit"),
 ]
 CONTACT = [
     ("web", "open raigon.dev"),
