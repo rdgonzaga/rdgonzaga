@@ -45,7 +45,7 @@ text{{font-family:{MONO};white-space:pre}}
 PROMPT = f'<tspan fill="{GREEN}">rai@raigon</tspan><tspan fill="{MUTED}">:~$ </tspan>'
 
 PROJECTS = [
-    ("promptpatrol", "security", ["finds security holes in", "AI-generated web apps"], "python · sast · dast"),
+    ("vibecheck", "security", ["finds security holes in", "AI-generated web apps"], "python · sast · dast"),
     ("archerbytes", "backend", ["knowledge-sharing platform", "for 20,000+ DLSU students"], "next.js · postgresql · drizzle"),
     ("f1-prediction", "ml", ["predicts F1 race results", "right after qualifying"], "python · xgboost"),
     ("resole", "full-stack", ["AI-graded peer-to-peer", "marketplace for footwear"], "next.js · expo · supabase · gemini"),
@@ -130,7 +130,8 @@ def cursor(x, y, delay):
 
 
 def render_hero():
-    W, H, X = 840, 326, 40
+    W, H, X = 840, 352, 40
+    py = 316  # prompt row, below the info lines
     px = X + len("rai@raigon:~$ ") * CHAR
 
     # 1. type the command
@@ -159,18 +160,20 @@ def render_hero():
     # 3. info lines stream in, then a fresh prompt
     lines = [
         f'cs student <tspan fill="{MUTED}">·</tspan> network &amp; information security <tspan fill="{MUTED}">@</tspan> dlsu',
+        f'java engineer intern <tspan fill="{MUTED}">@</tspan> ing hubs ph',
         f'ex ai &amp; brand design engineer <tspan fill="{MUTED}">@</tspan> decktradr',
         f'backend <tspan fill="{MUTED}">·</tspan> cybersecurity <tspan fill="{MUTED}">·</tspan> machine learning',
     ]
     for i, ln in enumerate(lines):
         body += f'<text class="in" {at(t + i * 0.18)} x="{X}" y="{206 + i * 26}" fill="{BODY}" font-size="15">{ln}</text>'
     t += len(lines) * 0.18 + 0.2
-    body += f'<text class="in" {at(t)} x="{X}" y="290" textLength="{len("rai@raigon:~$ ") * CHAR}" lengthAdjust="spacing" font-size="14">{PROMPT}</text>'
-    body += f'<text class="in" {at(t)} x="{W - X}" y="290" text-anchor="end" fill="{MUTED}" font-size="13">raigon.dev ↗</text>'
-    body += cursor(px, 290, t)
+    body += f'<text class="in" {at(t)} x="{X}" y="{py}" textLength="{len("rai@raigon:~$ ") * CHAR}" lengthAdjust="spacing" font-size="14">{PROMPT}</text>'
+    body += f'<text class="in" {at(t)} x="{W - X}" y="{py}" text-anchor="end" fill="{MUTED}" font-size="13">raigon.dev ↗</text>'
+    body += cursor(px, py, t)
     write_svg("hero.svg", W, H,
               "Terminal: whoami, Rainer Gonzaga. CS student, Network and Information Security at DLSU. "
-              "Ex AI and Brand Design Engineer at DeckTradr. Backend, cybersecurity, machine learning.", body)
+              "Java Engineer Intern at ING Hubs PH. Ex AI and Brand Design Engineer at DeckTradr. "
+              "Backend, cybersecurity, machine learning.", body)
 
 
 def render_projects():
