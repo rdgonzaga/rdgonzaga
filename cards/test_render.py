@@ -1,5 +1,7 @@
+import io
 import tempfile
 import unittest
+import urllib.error
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -129,6 +131,91 @@ class Render(unittest.TestCase):
     def test_long_artist_in_top_clipped(self):
         s = self.svg(top=[("y" * 40, 5)])
         self.assertIn(">" + "y" * 17 + "…</text>", s)
+
+
+class Live(unittest.TestCase):
+    M = {"track": "Better Together", "artist": "Jack Johnson", "album": "In Between Dreams",
+         "playing": False, "ago": "11h ago", "scrobbles": 111507, "art": None, "top": []}
+
+    def test_music_svg_returns_markup_without_writing(self):
+        with tempfile.TemporaryDirectory() as d:
+            old, render.ASSETS = render.ASSETS, Path(d)
+            try:
+                out = render.music_svg(self.M)
+            finally:
+                render.ASSETS = old
+            self.assertTrue(out.startswith("<svg"))
+            self.assertIn("Better Together", out)
+            self.assertEqual(list(Path(d).iterdir()), [])
+
+    def live(self, fetch):
+        old, render.fetch_music = render.fetch_music, fetch
+        try:
+            return render.live_music("key")
+        finally:
+            render.fetch_music = old
+
+    def test_live_ok_caches_a_minute(self):
+        body, ttl = self.live(lambda key: dict(self.M))
+        self.assertIn("Better Together", body)
+        self.assertEqual(ttl, 60)
+
+    def test_live_failure_serves_offline_card_briefly(self):
+        def boom(key):
+            raise OSError("last.fm down")
+        body, ttl = self.live(boom)
+        self.assertIn("taking a nap", body)
+        self.assertEqual(ttl, 10)
+
+    def test_live_without_key_or_scrobbles(self):
+        self.assertIn("taking a nap", render.live_music(None)[0])
+        self.assertIn("taking a nap", self.live(lambda key: None)[0])
+
+    def test_offline_card(self):
+        out = render.music_offline_svg()
+        self.assertTrue(out.startswith("<svg"))
+        self.assertIn("last.fm is taking a nap", out)
+        self.assertIn('width="840" height="188"', out)
+
+
+class Retry(unittest.TestCase):
+    def fake_urlopen(self, *failures):
+        calls = []
+
+        class Resp(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def urlopen(url, timeout=None):
+            calls.append(url)
+            if len(calls) <= len(failures):
+                raise urllib.error.HTTPError(url, failures[len(calls) - 1], "err", {}, None)
+            return Resp(b'{"ok": 1}')
+        return urlopen, calls
+
+    def call(self, *failures):
+        urlopen, calls = self.fake_urlopen(*failures)
+        old, render.urllib.request.urlopen = render.urllib.request.urlopen, urlopen
+        try:
+            return render.lastfm("k", "user.getinfo"), calls
+        finally:
+            render.urllib.request.urlopen = old
+
+    def test_retries_once_on_server_error(self):
+        out, calls = self.call(500)
+        self.assertEqual(out, {"ok": 1})
+        self.assertEqual(len(calls), 2)
+
+    def test_gives_up_after_second_server_error(self):
+        with self.assertRaises(urllib.error.HTTPError):
+            self.call(500, 503)
+
+    def test_no_retry_on_client_error(self):
+        with self.assertRaises(urllib.error.HTTPError):
+            self.call(403)
 
 
 class Top(unittest.TestCase):

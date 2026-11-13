@@ -4,7 +4,7 @@ Static panes (hero, projects, stack) come from the data below. The stats pane
 pulls numbers from the GitHub GraphQL API and the music pane pulls the last
 played track from Last.fm; each is skipped when its key isn't set. Pass
 `static`, `stats` or `music` to render only those.
-Run: STATS_TOKEN=$(gh auth token) LASTFM_API_KEY=... python .github/scripts/render.py
+Run: STATS_TOKEN=$(gh auth token) LASTFM_API_KEY=... python cards/render.py
 
 Animations are CSS so they switch off under prefers-reduced-motion; everything
 plays once on load except the cursor blink.
@@ -13,6 +13,7 @@ import base64
 import json
 import os
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
@@ -22,7 +23,7 @@ from pathlib import Path
 USER = "rdgonzaga"
 LASTFM_USER = "Reniaaar"
 LASTFM_PLACEHOLDER = "2a96cbd8b46e442fc41c2b86b821562f"  # Last.fm's grey star "no art" image
-ASSETS = Path(__file__).resolve().parents[2] / "assets"
+ASSETS = Path(__file__).resolve().parents[1] / "assets"
 
 BG, LINE, TEXT, BODY, MUTED, GREEN, SHADOW = (
     "#0a0c0f", "#2a3038", "#eceef1", "#c3c8ce", "#6b737d", "#4ade80", "#1d4d33")
@@ -44,15 +45,16 @@ text{{font-family:{MONO};white-space:pre}}
 PROMPT = f'<tspan fill="{GREEN}">rai@raigon</tspan><tspan fill="{MUTED}">:~$ </tspan>'
 
 PROJECTS = [
-    ("promptpatrol", "security", ["finds security holes in", "AI-generated web apps"], "python · sast · dast"),
+    ("vibecheck", "security", ["finds security holes in", "AI-generated web apps"], "python · sast · dast"),
     ("archerbytes", "backend", ["knowledge-sharing platform", "for 20,000+ DLSU students"], "next.js · postgresql · drizzle"),
     ("f1-prediction", "ml", ["predicts F1 race results", "right after qualifying"], "python · xgboost"),
-    ("f1-telemetry", "tooling", ["live telemetry dashboard for", "F1 25: 2026 Season Pack"], "python · fastapi · react"),
+    ("resole", "full-stack", ["AI-graded peer-to-peer", "marketplace for footwear"], "next.js · expo · supabase · gemini"),
 ]
 STACK = [
-    ("security", "kali · nmap · burp suite · metasploit · wireshark"),
-    ("backend", "python · node · java · fastapi · postgresql"),
-    ("frontend", "typescript · react · next.js · tailwind"),
+    ("languages", "python · typescript · java · c"),
+    ("backend", "node · express · next.js · fastapi"),
+    ("frontend", "react · next.js · react native · tailwind"),
+    ("security", "kali · wireshark · nmap · burp suite · metasploit"),
 ]
 CONTACT = [
     ("web", "open raigon.dev"),
@@ -110,13 +112,16 @@ def pane(W, H, title, right=None, x0=0, inset=14):
     return "".join(parts)
 
 
+def svg(W, H, label, body):
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}" '
+            f'role="img" aria-label="{escape(label)}">{STYLE}\n<rect width="{W}" height="{H}" fill="{BG}"/>\n'
+            f'{body}\n</svg>\n')
+
+
 def write_svg(name, W, H, label, body):
     path = ASSETS / name
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}" '
-        f'role="img" aria-label="{escape(label)}">{STYLE}\n<rect width="{W}" height="{H}" fill="{BG}"/>\n'
-        f'{body}\n</svg>\n', encoding="utf-8")
+    path.write_text(svg(W, H, label, body), encoding="utf-8")
 
 
 def cursor(x, y, delay):
@@ -125,7 +130,8 @@ def cursor(x, y, delay):
 
 
 def render_hero():
-    W, H, X = 840, 326, 40
+    W, H, X = 840, 352, 40
+    py = 316  # prompt row, below the info lines
     px = X + len("rai@raigon:~$ ") * CHAR
 
     # 1. type the command
@@ -154,18 +160,20 @@ def render_hero():
     # 3. info lines stream in, then a fresh prompt
     lines = [
         f'cs student <tspan fill="{MUTED}">·</tspan> network &amp; information security <tspan fill="{MUTED}">@</tspan> dlsu',
+        f'java engineer intern <tspan fill="{MUTED}">@</tspan> ing hubs ph',
         f'ex ai &amp; brand design engineer <tspan fill="{MUTED}">@</tspan> decktradr',
         f'backend <tspan fill="{MUTED}">·</tspan> cybersecurity <tspan fill="{MUTED}">·</tspan> machine learning',
     ]
     for i, ln in enumerate(lines):
         body += f'<text class="in" {at(t + i * 0.18)} x="{X}" y="{206 + i * 26}" fill="{BODY}" font-size="15">{ln}</text>'
     t += len(lines) * 0.18 + 0.2
-    body += f'<text class="in" {at(t)} x="{X}" y="290" textLength="{len("rai@raigon:~$ ") * CHAR}" lengthAdjust="spacing" font-size="14">{PROMPT}</text>'
-    body += f'<text class="in" {at(t)} x="{W - X}" y="290" text-anchor="end" fill="{MUTED}" font-size="13">raigon.dev ↗</text>'
-    body += cursor(px, 290, t)
+    body += f'<text class="in" {at(t)} x="{X}" y="{py}" textLength="{len("rai@raigon:~$ ") * CHAR}" lengthAdjust="spacing" font-size="14">{PROMPT}</text>'
+    body += f'<text class="in" {at(t)} x="{W - X}" y="{py}" text-anchor="end" fill="{MUTED}" font-size="13">raigon.dev ↗</text>'
+    body += cursor(px, py, t)
     write_svg("hero.svg", W, H,
               "Terminal: whoami, Rainer Gonzaga. CS student, Network and Information Security at DLSU. "
-              "Ex AI and Brand Design Engineer at DeckTradr. Backend, cybersecurity, machine learning.", body)
+              "Java Engineer Intern at ING Hubs PH. Ex AI and Brand Design Engineer at DeckTradr. "
+              "Backend, cybersecurity, machine learning.", body)
 
 
 def render_projects():
@@ -395,7 +403,14 @@ def parse_top(data):
 def lastfm(key, method, **params):
     q = urllib.parse.urlencode({"method": method, "user": LASTFM_USER, "api_key": key,
                                 "format": "json", "limit": 1, **params})
-    with urllib.request.urlopen(f"https://ws.audioscrobbler.com/2.0/?{q}", timeout=20) as resp:
+    url = f"https://ws.audioscrobbler.com/2.0/?{q}"
+    try:
+        resp = urllib.request.urlopen(url, timeout=20)
+    except urllib.error.HTTPError as e:
+        if e.code < 500:
+            raise
+        resp = urllib.request.urlopen(url, timeout=20)  # Last.fm throws the odd 500; one retry clears most
+    with resp:
         out = json.load(resp)
     if "error" in out:
         raise RuntimeError(out.get("message", out["error"]))
@@ -425,7 +440,8 @@ def fetch_music(key):
     return m
 
 
-def render_music(m):
+def music_svg(m):
+    """The card as markup; api/music.py serves this live."""
     W, H, X, A, R = 840, 188, 182, 120, 580  # A: art size, X: track column, R: this-week column
     body = pane(W, H, " now playing " if m["playing"] else " last played ", "last.fm")
 
@@ -486,7 +502,34 @@ def render_music(m):
     label += f". {m['scrobbles']:,} scrobbles."
     if m["top"]:
         label += " Top this week: " + ", ".join(n for n, _ in m["top"]) + "."
-    write_svg("music.svg", W, H, label, body)
+    return svg(W, H, label, body)
+
+
+def music_offline_svg():
+    """Shown by the live endpoint when Last.fm can't be reached."""
+    W, H = 840, 188
+    body = pane(W, H, " last played ", "last.fm")
+    body += typed(34, 58, "nowplaying --last", 0.4, per=0.035, size=13, fill=MUTED,
+                  prefix=f'<tspan fill="{GREEN}">$ </tspan>', prefix_len=2)
+    body += (f'<text class="in" {at(1.2)} x="34" y="92" fill="{BODY}" font-size="15">'
+             f'# last.fm is taking a nap, back soon</text>')
+    return svg(W, H, "Last played on Spotify: Last.fm is unavailable right now.", body)
+
+
+def live_music(key):
+    """(svg, seconds Vercel's CDN may cache it). Failures get a short TTL so
+    the real card comes back soon after Last.fm does."""
+    try:
+        m = fetch_music(key) if key else None
+    except Exception as e:  # any failure should still produce an image, not a 500
+        print(f"last.fm failed: {e!r}")
+        m = None
+    return (music_svg(m), 60) if m else (music_offline_svg(), 10)
+
+
+def render_music(m):
+    ASSETS.mkdir(parents=True, exist_ok=True)
+    (ASSETS / "music.svg").write_text(music_svg(m), encoding="utf-8")
 
 
 if __name__ == "__main__":

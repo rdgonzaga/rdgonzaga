@@ -1,19 +1,17 @@
 name: Render profile
 
+# the music card is live on Vercel (api/music.py); this only refreshes stats
 on:
   schedule:
-    - cron: "0 */6 * * *" # stats + music
-    - cron: "30 * * * *" # music
-    - cron: "0 1-5,7-11,13-17,19-23 * * *" # music, skipping the stats hours
+    - cron: "0 */6 * * *" # every 6 hours
   workflow_dispatch:
   push:
     branches: [main]
-    paths: [".github/scripts/render.py", ".github/workflows/render.yml"]
+    paths: ["cards/render.py", ".github/workflows/render.yml"]
 
 permissions:
   contents: write
 
-# runs rebuild `output` from its current files, so they must not overlap
 concurrency:
   group: output
   cancel-in-progress: false
@@ -28,57 +26,23 @@ jobs:
           python-version: "3.12"
       # STATS_TOKEN (a PAT with read:user) lets private contributions count;
       # without it the default token only sees public activity
-      - name: Render stats
-        id: stats
-        if: github.event_name != 'schedule' || github.event.schedule == '0 */6 * * *'
-        continue-on-error: true
-        run: python .github/scripts/render.py stats
+      - run: python cards/render.py stats
         env:
           STATS_TOKEN: ${{ secrets.STATS_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Render music
-        id: music
-        continue-on-error: true
-        run: python .github/scripts/render.py music
-        env:
-          LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
-      # `output` is an orphan branch force-pushed as a single commit, so the
-      # refreshes never pile up in history. Start from what's there and swap in
-      # only the cards rendered this run, so a failed fetch keeps the old card
-      - name: Publish to output branch
+      # stats.svg lives on an orphan `output` branch that's force-pushed as a
+      # single commit, so refreshes never pile up in main's history. If the
+      # render above fails this step is skipped and the old card stays up
+      - name: Publish stats to output branch
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           out=$(mktemp -d)
-          # exit 2 means the branch doesn't exist yet; anything else is a real
-          # error, and pushing from an empty dir then would drop the other card
-          found=0
-          git ls-remote --exit-code --heads origin output > /dev/null || found=$?
-          if [ "$found" = 0 ]; then
-            git fetch -q --depth=1 origin output
-            git archive FETCH_HEAD | tar -x -C "$out"
-          elif [ "$found" != 2 ]; then
-            echo "Couldn't read the output branch"
-            exit 1
-          fi
-          fresh=0
-          for f in stats music; do
-            if [ -f "assets/$f.svg" ]; then
-              cp "assets/$f.svg" "$out/"
-              fresh=1
-            fi
-          done
-          if [ "$fresh" = 0 ]; then
-            echo "Nothing rendered"
-            exit 0
-          fi
+          cp assets/stats.svg "$out/"
           cd "$out"
           git init -q -b output
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -q -m "chore: refresh profile cards"
+          git add stats.svg
+          git commit -q -m "chore: refresh profile stats"
           git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" output
-      - name: Fail if a render failed
-        if: steps.stats.outcome == 'failure' || steps.music.outcome == 'failure'
-        run: exit 1
