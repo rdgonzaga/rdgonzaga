@@ -61,6 +61,11 @@ CONTACT = [
     ("mail", "mail rainerdgonzaga@gmail.com"),
     ("linkedin", "open in/rdgonzaga"),
 ]
+LIVE = [
+    ("f1", "open f1.raigon.dev"),
+    ("wordwork", "open wordwork.raigon.dev"),
+    ("spinboxd", "open spinboxd.raigon.dev"),
+]
 EXCLUDE_LANGS = {"Jupyter Notebook"}
 
 # ANSI Shadow letters, block rows only; each █ becomes a rect so the art
@@ -204,13 +209,21 @@ def render_stack():
     write_svg("stack.svg", W, H, "Stack. " + ". ".join(f"{k}: {v}" for k, v in STACK), body)
 
 
-def render_contact():
+def link_panes(folder, items):
     W, H = 280, 96
-    for idx, (slug, cmd) in enumerate(CONTACT):
+    for idx, (slug, cmd) in enumerate(items):
         body = pane(W, H, f" {slug} ", "↗")
         body += typed(30, 60, cmd, 0.4 + idx * 0.3, per=0.03, size=12.5, fill=BODY,
                       prefix=f'<tspan fill="{GREEN}">$ </tspan>', prefix_len=2)
-        write_svg(f"contact/{slug}.svg", W, H, f"{slug}: {cmd.split(' ', 1)[1]}", body)
+        write_svg(f"{folder}/{slug}.svg", W, H, f"{slug}: {cmd.split(' ', 1)[1]}", body)
+
+
+def render_contact():
+    link_panes("contact", CONTACT)
+
+
+def render_live():
+    link_panes("live", LIVE)
 
 
 # ---------- stats from the GitHub API ----------
@@ -539,6 +552,7 @@ if __name__ == "__main__":
         render_projects()
         render_stack()
         render_contact()
+        render_live()
     if "stats" in targets:
         token = os.environ.get("STATS_TOKEN") or os.environ.get("GITHUB_TOKEN")
         if token:
