@@ -12,6 +12,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from html import escape
 from pathlib import Path
@@ -20,6 +21,8 @@ USER = "rdgonzaga"
 LASTFM_USER = "Reniaaar"
 LASTFM_PLACEHOLDER = "2a96cbd8b46e442fc41c2b86b821562f"  # Last.fm's grey star "no art" image
 ASSETS = Path(__file__).resolve().parents[1] / "assets"
+MANILA = timezone(timedelta(hours=8))  # days for the weekly sparkline; fixed offset, no tzdata needed
+WEEK_PAGES = 5  # 200 scrobbles a page, so the sparkline counts up to 1,000 plays a week
 
 
 
@@ -209,6 +212,32 @@ def parse_top(data):
     return [(a["name"], int(a["playcount"])) for a in artists[:3]]
 
 
+def parse_playcount(data):
+    n = int(data["track"].get("userplaycount", 0))
+    return n or None
+
+
+def week_start(now):
+    """Midnight in Manila six days back, so the window is the last 7 local days."""
+    today = now.astimezone(MANILA).replace(hour=0, minute=0, second=0, microsecond=0)
+    return (today - timedelta(days=6)).astimezone(timezone.utc)
+
+
+def parse_week(pages, now):
+    first = week_start(now).astimezone(MANILA).date()
+    days = [0] * 7
+    for page in pages:
+        tracks = page["recenttracks"]["track"]
+        for t in [tracks] if isinstance(tracks, dict) else tracks:
+            if "date" not in t:  # the now-playing track isn't a scrobble yet
+                continue
+            day = datetime.fromtimestamp(int(t["date"]["uts"]), MANILA).date()
+            i = (day - first).days
+            if 0 <= i < 7:
+                days[i] += 1
+    return {"total": int(pages[0]["recenttracks"]["@attr"]["total"]), "days": days}
+
+
 def lastfm(key, method, **params):
     q = urllib.parse.urlencode({"method": method, "user": LASTFM_USER, "api_key": key,
                                 "format": "json", "limit": 1, **params})
@@ -240,12 +269,36 @@ def fetch_art(url):
     return f"data:{kind};base64,{base64.b64encode(data).decode()}"
 
 
+def fetch_week(key, now):
+    def page(n):
+        return lastfm(key, "user.getrecenttracks", limit=200, page=n,
+                      **{"from": int(week_start(now).timestamp())})
+    first = page(1)
+    pages = min(int(first["recenttracks"]["@attr"]["totalPages"]), WEEK_PAGES)
+    with ThreadPoolExecutor(4) as pool:
+        return parse_week([first, *pool.map(page, range(2, pages + 1))], now)
+
+
+def optional(fn, *args):
+    """The extras shouldn't take the whole card down; they just drop off."""
+    try:
+        return fn(*args)
+    except Exception as e:
+        print(f"{fn.__name__} skipped: {e!r}")
+        return None
+
+
 def fetch_music(key):
-    m = parse_music(lastfm(key, "user.getrecenttracks"), lastfm(key, "user.getinfo"),
-                    datetime.now(timezone.utc))
+    now = datetime.now(timezone.utc)
+    m = parse_music(lastfm(key, "user.getrecenttracks"), lastfm(key, "user.getinfo"), now)
     if m:
-        m["art"] = fetch_art(m["art"])
-        m["top"] = parse_top(lastfm(key, "user.gettopartists", period="7day", limit=3))
+        with ThreadPoolExecutor(4) as pool:
+            art = pool.submit(fetch_art, m["art"])
+            top = pool.submit(lastfm, key, "user.gettopartists", period="7day", limit=3)
+            plays = pool.submit(optional, lambda: parse_playcount(lastfm(
+                key, "track.getInfo", artist=m["artist"], track=m["track"], username=LASTFM_USER)))
+            week = pool.submit(optional, fetch_week, key, now)
+            m.update(art=art.result(), top=parse_top(top.result()), plays=plays.result(), week=week.result())
     return m
 
 
@@ -267,15 +320,27 @@ def music_svg(m, theme="sunset"):
         for i, d in enumerate((0, .3, .15, .45)):
             body += (f'<rect class="eq" style="animation-delay:{d}s" x="{X + i * 5}" y="42" '
                      f'width="3" height="12" rx="1" fill="{t["accent"]}"/>')
-        body += f'<text x="{X + 28}" y="54" fill="{t["muted"]}" font-size="15" font-weight="500">Now playing</text>'
+    plays = m.get("plays")
+    count = f' · {plays:,} play{"s" if plays != 1 else ""}' if plays else ""
+    if m["playing"]:
+        body += f'<text x="{X + 28}" y="54" fill="{t["muted"]}" font-size="15" font-weight="500">Now playing{count}</text>'
     else:
-        body += f'<text x="{X}" y="54" fill="{t["muted"]}" font-size="15" font-weight="500">Last played {m["ago"]}</text>'
+        body += f'<text x="{X}" y="54" fill="{t["muted"]}" font-size="15" font-weight="500">Last played {m["ago"]}{count}</text>'
     body += (f'<text x="{X}" y="92" fill="{t["ink"]}" font-size="28" font-weight="700" letter-spacing="-0.5">'
              f'{escape(clip(m["track"], 24))}</text>'
              f'<text x="{X}" y="120" fill="{t["muted"]}" font-size="17" font-weight="500">{escape(clip(m["artist"], 34))}</text>')
 
     # this week's top artists share the card instead of adding another one
-    body += f'<text x="{R}" y="54" fill="{t["muted"]}" font-size="15" font-weight="500">This week</text>'
+    week = m.get("week")
+    head = f'{week["total"]:,} plays this week' if week else "This week"
+    body += f'<text x="{R}" y="54" fill="{t["muted"]}" font-size="15" font-weight="500">{head}</text>'
+    if week:  # plays per day, oldest first, right-aligned with the counts below
+        peak = max(week["days"]) or 1
+        for i, n in enumerate(week["days"]):
+            h = max(2, round(16 * n / peak))
+            fill, op = (t["accent"], .9) if n else (t["ink"], .2)
+            body += (f'<rect class="spark" x="{W - 32 - 53 + i * 8}" y="{54 - h}" width="5" height="{h}" '
+                     f'rx="1" fill="{fill}" fill-opacity="{op}"/>')
     for i, (name, plays) in enumerate(m["top"]):
         y = 82 + i * 24
         body += (f'<text x="{R}" y="{y}" fill="{t["ink"]}" font-size="16" font-weight="500">{escape(clip(name, 18))}</text>'
@@ -287,6 +352,8 @@ def music_svg(m, theme="sunset"):
     label = f'{verb} on Spotify: {m["track"]} by {m["artist"]}'
     label += f', from {m["album"]}' if m["album"] else ""
     label += f". {m['scrobbles']:,} scrobbles."
+    if week:
+        label += f" {week['total']:,} plays in the last 7 days."
     if m["top"]:
         label += " Top this week: " + ", ".join(n for n, _ in m["top"]) + "."
     return glass_svg("music", theme, W, MUSIC_H, label, body)

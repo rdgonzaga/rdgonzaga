@@ -65,6 +65,35 @@ class Parse(unittest.TestCase):
     def test_no_tracks(self):
         self.assertIsNone(render.parse_music({"recenttracks": {"track": []}}, INFO, NOW))
 
+    def test_playcount(self):
+        self.assertEqual(render.parse_playcount({"track": {"userplaycount": "47"}}), 47)
+        self.assertIsNone(render.parse_playcount({"track": {"userplaycount": "0"}}))
+        self.assertIsNone(render.parse_playcount({"track": {}}))
+
+    def test_week_start_is_local_midnight_six_days_back(self):
+        # NOW is 20:00 on Oct 13 in Manila, so the window opens Oct 7 00:00 there
+        start = render.week_start(NOW)
+        self.assertEqual(start, datetime(2026, 10, 6, 16, 0, tzinfo=timezone.utc))
+
+    def test_week_buckets_by_manila_day(self):
+        def at(dt):
+            return track(uts=int(dt.timestamp()))
+        page = {"recenttracks": {"@attr": {"total": "4", "totalPages": "1"}, "track": [
+            track(playing=True),  # not scrobbled yet, no date
+            at(NOW),  # today
+            at(datetime(2026, 10, 12, 17, 0, tzinfo=timezone.utc)),  # Oct 13 01:00 Manila: today
+            at(datetime(2026, 10, 12, 15, 0, tzinfo=timezone.utc)),  # Oct 12 23:00 Manila
+            at(datetime(2026, 10, 6, 16, 0, tzinfo=timezone.utc)),  # first day
+        ]}}
+        w = render.parse_week([page], NOW)
+        self.assertEqual(w["total"], 4)
+        self.assertEqual(w["days"], [1, 0, 0, 0, 0, 1, 2])
+
+    def test_week_merges_pages_and_single_track_dict(self):
+        p1 = {"recenttracks": {"@attr": {"total": "2", "totalPages": "2"}, "track": [track(uts=int(NOW.timestamp()))]}}
+        p2 = {"recenttracks": {"@attr": {"total": "2", "totalPages": "2"}, "track": track(uts=int(NOW.timestamp()))}}
+        self.assertEqual(render.parse_week([p1, p2], NOW)["days"][-1], 2)
+
 
 class Render(unittest.TestCase):
     def setUp(self):
@@ -130,6 +159,28 @@ class Render(unittest.TestCase):
     def test_long_artist_in_top_clipped(self):
         s = self.svg(top=[("y" * 40, 5)])
         self.assertIn(">" + "y" * 17 + "…</text>", s)
+
+    def test_track_playcount(self):
+        self.assertIn("Last played 11h ago · 47 plays", self.svg(plays=47))
+        self.assertIn("· 1 play<", self.svg(plays=1))
+        self.assertIn(">Now playing · 47 plays<", self.svg(plays=47, playing=True, ago=None))
+        self.assertNotIn(" plays<", self.svg())
+
+    def test_week_header_and_sparkline(self):
+        s = self.svg(week={"total": 1204, "days": [0, 10, 20, 40, 30, 5, 12]})
+        self.assertIn(">1,204 plays this week<", s)
+        self.assertNotIn(">This week<", s)
+        self.assertEqual(s.count('class="spark"'), 7)
+        self.assertIn("1,204 plays in the last 7 days", s)  # aria-label
+
+    def test_week_missing_keeps_plain_header(self):
+        s = self.svg(week=None)
+        self.assertIn(">This week<", s)
+        self.assertNotIn('class="spark"', s)
+
+    def test_week_all_zero_does_not_divide_by_zero(self):
+        s = self.svg(week={"total": 0, "days": [0] * 7})
+        self.assertEqual(s.count('class="spark"'), 7)
 
 
 class Live(unittest.TestCase):
