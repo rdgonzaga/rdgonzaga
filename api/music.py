@@ -3,6 +3,7 @@ import os
 import sys
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "cards"))
 import render  # noqa: E402
@@ -10,7 +11,9 @@ import render  # noqa: E402
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        body, ttl = render.live_music(os.environ.get("LASTFM_API_KEY"))
+        # ?theme=morning is the light-mode card; anything else gets sunset
+        theme = parse_qs(urlparse(self.path).query).get("theme", ["sunset"])[0]
+        body, ttl = render.live_music(os.environ.get("LASTFM_API_KEY"), theme)
         data = body.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "image/svg+xml; charset=utf-8")

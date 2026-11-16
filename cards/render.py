@@ -1,13 +1,9 @@
-"""Render every SVG pane in assets/ for the profile README.
-
-Static panes (hero, projects, stack) come from the data below. The stats pane
-pulls numbers from the GitHub GraphQL API and the music pane pulls the last
-played track from Last.fm; each is skipped when its key isn't set. Pass
-`static`, `stats` or `music` to render only those.
+"""Render the live cards for the profile README: stats from the GitHub GraphQL
+API (CI, every 6 hours) and the music card from Last.fm (served by api/music.py).
+Each is skipped when its key isn't set. Pass `stats` or `music` to render one.
 Run: STATS_TOKEN=$(gh auth token) LASTFM_API_KEY=... python cards/render.py
 
-Animations are CSS so they switch off under prefers-reduced-motion; everything
-plays once on load except the cursor blink.
+The static images (hero, projects, skills, contact, banner) come from scene.py.
 """
 import base64
 import json
@@ -25,205 +21,45 @@ LASTFM_USER = "Reniaaar"
 LASTFM_PLACEHOLDER = "2a96cbd8b46e442fc41c2b86b821562f"  # Last.fm's grey star "no art" image
 ASSETS = Path(__file__).resolve().parents[1] / "assets"
 
-BG, LINE, TEXT, BODY, MUTED, GREEN, SHADOW = (
-    "#0a0c0f", "#2a3038", "#eceef1", "#c3c8ce", "#6b737d", "#4ade80", "#1d4d33")
-HEAT = ["#161b22", "#0e4429", "#006d32", "#26a641", "#39d353"]
-MONO = "'JetBrains Mono', ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace"
-CHAR = 8.0  # mono advance at 14px; typed lines are pinned to it with textLength so any font lines up
-STYLE = f"""<style>
-text{{font-family:{MONO};white-space:pre}}
-.in{{opacity:0;animation:in .3s ease-out forwards}}
-.grow{{transform-box:fill-box;transform-origin:left;transform:scaleX(0);animation:grow .7s cubic-bezier(.2,.7,.2,1) forwards}}
-.cover{{transform-box:fill-box;transform-origin:right;animation-fill-mode:forwards;animation-name:type}}
-.blink{{animation:blink 1.06s steps(1) infinite}}
-@keyframes in{{to{{opacity:1}}}}
-@keyframes grow{{to{{transform:scaleX(1)}}}}
-@keyframes type{{to{{transform:scaleX(0)}}}}
-@keyframes blink{{50%{{opacity:0}}}}
-@media (prefers-reduced-motion:reduce){{*{{animation:none!important}}.in{{opacity:1}}.grow{{transform:none}}.cover{{display:none}}}}
-</style>"""
-PROMPT = f'<tspan fill="{GREEN}">rai@raigon</tspan><tspan fill="{MUTED}">:~$ </tspan>'
 
-PROJECTS = [
-    ("vibecheck", "security", ["finds security holes in", "AI-generated web apps"], "python · sast · dast"),
-    ("archerbytes", "backend", ["knowledge-sharing platform", "for 20,000+ DLSU students"], "next.js · postgresql · drizzle"),
-    ("f1-prediction", "ml", ["predicts F1 race results", "right after qualifying"], "python · xgboost"),
-    ("resole", "full-stack", ["AI-graded peer-to-peer", "marketplace for footwear"], "next.js · expo · supabase · gemini"),
-]
-STACK = [
-    ("languages", "python · typescript · java · c"),
-    ("backend", "node · express · next.js · fastapi"),
-    ("frontend", "react · next.js · react native · tailwind"),
-    ("security", "kali · wireshark · nmap · burp suite · metasploit"),
-]
-CONTACT = [
-    ("web", "open raigon.dev"),
-    ("mail", "mail rainerdgonzaga@gmail.com"),
-    ("linkedin", "open in/rdgonzaga"),
-]
-LIVE = [
-    ("f1", "open f1.raigon.dev"),
-    ("wordwork", "open wordwork.raigon.dev"),
-    ("spinboxd", "open spinboxd.raigon.dev"),
-]
-EXCLUDE_LANGS = {"Jupyter Notebook"}
 
-# ANSI Shadow letters, block rows only; each █ becomes a rect so the art
-# doesn't depend on the viewer's font
-ART = {
-    "R": ["██████╗ ", "██╔══██╗", "██████╔╝", "██╔══██╗", "██║  ██║"],
-    "A": [" █████╗ ", "██╔══██╗", "███████║", "██╔══██║", "██║  ██║"],
-    "I": ["██╗", "██║", "██║", "██║", "██║"],
-    "N": ["███╗   ██╗", "████╗  ██║", "██╔██╗ ██║", "██║╚██╗██║", "██║ ╚████║"],
-    "E": ["███████╗", "██╔════╝", "█████╗  ", "██╔══╝  ", "███████╗"],
-    "G": [" ██████╗ ", "██╔════╝ ", "██║  ███╗", "██║   ██║", "╚██████╔╝"],
-    "O": [" ██████╗ ", "██╔═══██╗", "██║   ██║", "██║   ██║", "╚██████╔╝"],
-    "Z": ["███████╗", "╚══███╔╝", "  ███╔╝ ", " ███╔╝  ", "███████╗"],
-    " ": ["  "] * 5,
+# ---------- glass cards ----------
+# The live cards match the scene images (cards/scene.py): glass over a blurred
+# lake, sunset in dark mode and morning in light. Each card's background is its
+# own slice of the shared lake sheet, cut and tinted by scene.py.
+CARDS = Path(__file__).resolve().parent
+GLASS = {
+    "sunset": {"ink": "#f1eadc", "muted": "#d8cdb8", "accent": "#e9b660"},
+    "morning": {"ink": "#1d1b17", "muted": "#4a443a", "accent": "#b07814"},
 }
+SANS = "'Familjen Grotesk', system-ui, -apple-system, 'Segoe UI', sans-serif"
+STATS_H, MUSIC_H = 236, 160  # must match the rows in scene.py
 
 
-def at(delay):
-    return f'style="animation-delay:{delay:.2f}s"'
+def inline(path, kind):
+    return f"data:{kind};base64,{base64.b64encode(path.read_bytes()).decode()}"
 
 
-def typed(x, y, text, delay, per=0.06, size=14, fill=TEXT, prefix="", prefix_len=0):
-    """Line whose `text` part is revealed char by char as a background-colored
-    cover shrinks toward its right edge. `prefix` (already-escaped SVG) shows at once."""
-    c = CHAR * size / 14
-    w = len(text) * c + 4
-    cx = x + prefix_len * c
-    return (f'<text x="{x:.1f}" y="{y}" textLength="{(prefix_len + len(text)) * c:.1f}" lengthAdjust="spacing" '
-            f'font-size="{size}">{prefix}<tspan fill="{fill}">{escape(text)}</tspan></text>'
-            f'<rect class="cover" x="{cx - 1:.1f}" y="{y - size}" width="{w:.1f}" height="{size + 6}" fill="{BG}" '
-            f'style="animation-duration:{len(text) * per:.2f}s;'
-            f'animation-timing-function:steps({len(text)});animation-delay:{delay:.2f}s"/>')
-
-
-def pane(W, H, title, right=None, x0=0, inset=14):
-    """TUI box (btop/lazygit style) with the title cut into the top border."""
-    x, tw = x0 + inset, len(title) * 7.8 + 16
-    parts = [
-        f'<rect x="{x}" y="{inset}" width="{W - 2 * inset}" height="{H - 2 * inset}" rx="6" fill="none" stroke="{LINE}"/>',
-        f'<rect x="{x + 14}" y="{inset - 8}" width="{tw:.0f}" height="16" fill="{BG}"/>',
-        f'<text x="{x + 22}" y="{inset + 4.5}" fill="{GREEN}" font-size="13" font-weight="600">{escape(title)}</text>',
-    ]
-    if right:
-        rw, rx = len(right) * 7.8 + 16, x0 + W - inset
-        parts += [
-            f'<rect x="{rx - 14 - rw:.0f}" y="{inset - 8}" width="{rw:.0f}" height="16" fill="{BG}"/>',
-            f'<text x="{rx - 22}" y="{inset + 4.5}" text-anchor="end" fill="{MUTED}" font-size="13">{escape(right)}</text>',
-        ]
-    return "".join(parts)
-
-
-def svg(W, H, label, body):
+def glass_svg(slug, theme, W, H, label, body):
+    """A rounded card inset 6px; camo blocks outside fetches, so the font and
+    the lake are inlined."""
+    theme = theme if theme in GLASS else "sunset"
+    fonts = "".join(
+        f"@font-face{{font-family:'Familjen Grotesk';font-weight:{w};"
+        f"src:url({inline(CARDS / 'fonts' / f'familjen-latin-{w}.woff2', 'font/woff2')}) format('woff2')}}"
+        for w in (500, 700))
+    style = (f"<style>{fonts}text{{font-family:{SANS}}}"
+             ".eq{transform-box:fill-box;transform-origin:bottom;animation:eq .9s ease-in-out infinite alternate}"
+             "@keyframes eq{from{transform:scaleY(.3)}to{transform:scaleY(1)}}"
+             "@media (prefers-reduced-motion:reduce){*{animation:none!important}}</style>")
+    bg = inline(CARDS / f"bg-{slug}-{theme}.jpg", "image/jpeg")
+    w, h = W - 12, H - 12
     return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}" '
-            f'role="img" aria-label="{escape(label)}">{STYLE}\n<rect width="{W}" height="{H}" fill="{BG}"/>\n'
-            f'{body}\n</svg>\n')
-
-
-def write_svg(name, W, H, label, body):
-    path = ASSETS / name
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(svg(W, H, label, body), encoding="utf-8")
-
-
-def cursor(x, y, delay):
-    return (f'<g class="in" {at(delay)}><rect class="blink" x="{x:.1f}" y="{y - 12}" width="8" height="15" '
-            f'fill="{GREEN}"/></g>')
-
-
-def render_hero():
-    W, H, X = 840, 352, 40
-    py = 316  # prompt row, below the info lines
-    px = X + len("rai@raigon:~$ ") * CHAR
-
-    # 1. type the command
-    t = 0.4
-    body = pane(W, H, " rai@raigon ", "zsh")
-    body += typed(X, 70, "whoami", t, per=0.09, prefix=PROMPT, prefix_len=len("rai@raigon:~$ "))
-    t += 6 * 0.09 + 0.25
-
-    # 2. print the name one letter at a time
-    cw, ch, ay = 6.4, 12, 108
-    col = 0
-    for i, c in enumerate("RAINER GONZAGA"):
-        letter = ART[c]
-        rects = [(X + (col + cx) * cw, ay + ry * ch)
-                 for ry, row in enumerate(letter) for cx, v in enumerate(row) if v == "█"]
-        col += len(letter[0])
-        if not rects:
-            continue
-        d = t + i * 0.045
-        shadow = "".join(f'<rect x="{x + 3:.1f}" y="{y + 3}" width="{cw + .5:.1f}" height="{ch + .5}"/>' for x, y in rects)
-        front = "".join(f'<rect x="{x:.1f}" y="{y}" width="{cw + .5:.1f}" height="{ch + .5}"/>' for x, y in rects)
-        body += (f'<g class="in" {at(d)} shape-rendering="crispEdges"><g fill="{SHADOW}">{shadow}</g>'
-                 f'<g fill="{GREEN}">{front}</g></g>')
-    t += 14 * 0.045 + 0.3
-
-    # 3. info lines stream in, then a fresh prompt
-    lines = [
-        f'cs student <tspan fill="{MUTED}">·</tspan> network &amp; information security <tspan fill="{MUTED}">@</tspan> dlsu',
-        f'java engineer intern <tspan fill="{MUTED}">@</tspan> ing hubs ph',
-        f'ex ai &amp; brand design engineer <tspan fill="{MUTED}">@</tspan> decktradr',
-        f'backend <tspan fill="{MUTED}">·</tspan> cybersecurity <tspan fill="{MUTED}">·</tspan> machine learning',
-    ]
-    for i, ln in enumerate(lines):
-        body += f'<text class="in" {at(t + i * 0.18)} x="{X}" y="{206 + i * 26}" fill="{BODY}" font-size="15">{ln}</text>'
-    t += len(lines) * 0.18 + 0.2
-    body += f'<text class="in" {at(t)} x="{X}" y="{py}" textLength="{len("rai@raigon:~$ ") * CHAR}" lengthAdjust="spacing" font-size="14">{PROMPT}</text>'
-    body += f'<text class="in" {at(t)} x="{W - X}" y="{py}" text-anchor="end" fill="{MUTED}" font-size="13">raigon.dev ↗</text>'
-    body += cursor(px, py, t)
-    write_svg("hero.svg", W, H,
-              "Terminal: whoami, Rainer Gonzaga. CS student, Network and Information Security at DLSU. "
-              "Java Engineer Intern at ING Hubs PH. Ex AI and Brand Design Engineer at DeckTradr. "
-              "Backend, cybersecurity, machine learning.", body)
-
-
-def render_projects():
-    W, H = 420, 176
-    for idx, (slug, kind, desc, stack) in enumerate(PROJECTS):
-        t = 0.5 + idx * 0.35  # cascade across the grid
-        cmd = f"./{slug} --about"
-        body = pane(W, H, f" {slug} ", kind)
-        body += typed(34, 58, cmd, t, per=0.035, size=13, fill=MUTED,
-                      prefix=f'<tspan fill="{GREEN}">$ </tspan>', prefix_len=2)
-        t += len(cmd) * 0.035 + 0.2
-        for i, d in enumerate(desc):
-            body += f'<text class="in" {at(t + i * 0.12)} x="34" y="{88 + i * 24}" fill="{TEXT}" font-size="16">{escape(d)}</text>'
-        t += len(desc) * 0.12 + 0.1
-        body += f'<text class="in" {at(t)} x="34" y="144" fill="{MUTED}" font-size="12.5"># {escape(stack)}</text>'
-        body += f'<text class="in" {at(t + 0.1)} x="{W - 34}" y="144" text-anchor="end" fill="{GREEN}" font-size="14">→</text>'
-        write_svg(f"projects/{slug}.svg", W, H, f"{slug}: {' '.join(desc)}. Built with {stack}.", body)
-
-
-def render_stack():
-    W, X = 840, 34
-    H = 40 + len(STACK) * 30 + 34
-    body = pane(W, H, " stack ", "cat stack.txt")
-    for i, (k, v) in enumerate(STACK):
-        y, t = 64 + i * 30, 0.4 + i * 0.25
-        body += f'<text class="in" {at(t)} x="{X}" y="{y}" fill="{MUTED}" font-size="14">{k}</text>'
-        body += typed(X + 110, y, v, t + 0.1, per=0.015, fill=BODY)
-    write_svg("stack.svg", W, H, "Stack. " + ". ".join(f"{k}: {v}" for k, v in STACK), body)
-
-
-def link_panes(folder, items):
-    W, H = 280, 96
-    for idx, (slug, cmd) in enumerate(items):
-        body = pane(W, H, f" {slug} ", "↗")
-        body += typed(30, 60, cmd, 0.4 + idx * 0.3, per=0.03, size=12.5, fill=BODY,
-                      prefix=f'<tspan fill="{GREEN}">$ </tspan>', prefix_len=2)
-        write_svg(f"{folder}/{slug}.svg", W, H, f"{slug}: {cmd.split(' ', 1)[1]}", body)
-
-
-def render_contact():
-    link_panes("contact", CONTACT)
-
-
-def render_live():
-    link_panes("live", LIVE)
+            f'role="img" aria-label="{escape(label)}">{style}'
+            f'<clipPath id="card"><rect x="6" y="6" width="{w}" height="{h}" rx="16"/></clipPath>'
+            f'<image href="{bg}" x="6" y="6" width="{w}" height="{h}" preserveAspectRatio="none" clip-path="url(#card)"/>'
+            f'<rect x="6.5" y="6.5" width="{w - 1}" height="{h - 1}" rx="15.5" fill="none" stroke="#fff" stroke-opacity=".13"/>'
+            f'\n{body}\n</svg>\n')
 
 
 # ---------- stats from the GitHub API ----------
@@ -245,20 +81,10 @@ def fetch_stats(token):
     query($login: String!) {
       user(login: $login) {
         createdAt
-        pullRequests { totalCount }
         contributionsCollection {
           totalCommitContributions
           restrictedContributionsCount
           contributionCalendar { totalContributions }
-        }
-        repositories(ownerAffiliations: OWNER, isFork: false, privacy: PUBLIC, first: 100) {
-          totalCount
-          nodes {
-            stargazerCount
-            languages(first: 10, orderBy: {field: SIZE, direction: DESC}) {
-              edges { size node { name color } }
-            }
-          }
         }
       }
     }""", {"login": USER})["user"]
@@ -294,78 +120,48 @@ def fetch_stats(token):
         current += 1
         cursor_day -= timedelta(days=1)
 
-    langs = {}
-    for repo in user["repositories"]["nodes"]:
-        for e in repo["languages"]["edges"]:
-            name = e["node"]["name"]
-            if name not in EXCLUDE_LANGS:
-                size, _ = langs.get(name, (0, None))
-                langs[name] = (size + e["size"], e["node"]["color"] or BODY)
-    total = sum(s for s, _ in langs.values()) or 1
-    top = sorted(langs.items(), key=lambda kv: kv[1][0], reverse=True)[:6]
-
     cc = user["contributionsCollection"]
     return {
         "contributions": cc["contributionCalendar"]["totalContributions"],
         "commits": cc["totalCommitContributions"] + cc["restrictedContributionsCount"],
-        "prs": user["pullRequests"]["totalCount"],
-        "repos": user["repositories"]["totalCount"],
-        "stars": sum(r["stargazerCount"] for r in user["repositories"]["nodes"]),
         "current": current,
         "longest": longest,
-        "recent": [n for _, n in ordered[-7 * 22:]],
-        "langs": [(name, 100 * size / total, color) for name, (size, color) in top],
+        "recent": [n for _, n in ordered[-7 * 52:]],
         "synced": now.strftime("%Y-%m-%d"),
     }
 
 
-def render_stats(s):
-    W, H, half = 840, 354, 420
-    body = pane(half, 206, " stats ", "last 12 months") + pane(half, 206, " streak ", x0=half)
+def stats_svg(s, theme="sunset"):
+    t = GLASS.get(theme, GLASS["sunset"])
+    W, X = 840, 30
+    figures = [(s["contributions"], "contributions this year"), (s["commits"], "commits"),
+               (s["current"], "day streak"), (s["longest"], "longest streak")]
+    body = ""
+    for i, (n, label) in enumerate(figures):
+        x = X + i * 196
+        body += (f'<text x="{x}" y="58" fill="{t["ink"]}" font-size="30" font-weight="700" letter-spacing="-0.8">{n:,}</text>'
+                 f'<text x="{x}" y="82" fill="{t["muted"]}" font-size="14" font-weight="500">{label}</text>')
 
-    rows = [("contributions", s["contributions"]), ("commits", s["commits"]),
-            ("pull requests", s["prs"]), ("public repos", s["repos"]), ("stars", s["stars"])]
-    for i, (k, v) in enumerate(rows):
-        y, t = 60 + i * 28, 0.4 + i * 0.12
-        body += (f'<g class="in" {at(t)}><text x="34" y="{y}" fill="{MUTED}" font-size="14">{k}</text>'
-                 f'<text x="{half - 34}" y="{y}" text-anchor="end" fill="{TEXT}" font-size="14" font-weight="600">{v:,}</text></g>')
-
-    sx = half + 34
-    body += (f'<g class="in" {at(0.4)}><text x="{sx}" y="60" fill="{MUTED}" font-size="14">current</text>'
-             f'<text x="{sx + 90}" y="60" fill="{GREEN}" font-size="14" font-weight="600">{s["current"]} days</text></g>'
-             f'<g class="in" {at(0.52)}><text x="{sx}" y="88" fill="{MUTED}" font-size="14">longest</text>'
-             f'<text x="{sx + 90}" y="88" fill="{TEXT}" font-size="14" font-weight="600">{s["longest"]} days</text></g>')
-    # last ~22 weeks as a heatmap, columns are weeks; quartile shading like
-    # GitHub's; cells sweep in left to right
-    active = sorted(n for n in s["recent"] if n)
+    # the last year as a heatmap, one column per week, in the accent at four strengths
+    days = s["recent"][-7 * 52:]
+    active = sorted(n for n in days if n)
     cuts = [active[len(active) * q // 4] for q in (1, 2, 3)] if active else [1, 1, 1]
-    for i, n in enumerate(s["recent"]):
+    step = (W - 2 * X) / 52
+    for i, n in enumerate(days):
         level = 0 if n == 0 else 1 + sum(n >= c for c in cuts)
         wk, dy = divmod(i, 7)
-        body += (f'<rect class="in" {at(0.7 + wk * 0.04 + dy * 0.01)} x="{sx + wk * 15.5:.1f}" y="{106 + dy * 10}" '
-                 f'width="13" height="8" rx="1.5" fill="{HEAT[level]}"/>')
+        fill, op = (t["ink"], 0.08) if level == 0 else (t["accent"], (0.35, 0.55, 0.78, 1)[level - 1])
+        body += (f'<rect x="{X + wk * step:.1f}" y="{104 + dy * 14.5:.1f}" width="{step - 3:.1f}" height="11.5" rx="2.5" '
+                 f'fill="{fill}" fill-opacity="{op}"/>')
+    label = (f"GitHub stats: {s['contributions']} contributions this year, {s['commits']} commits. "
+             f"Current streak {s['current']} days, longest {s['longest']} days. Synced {s['synced']}.")
+    return glass_svg("stats", theme, W, STATS_H, label, body)
 
-    # languages pane: bar segments grow in sequence, legend follows
-    top, lx, bw = 214, 34, W - 68
-    body += f'<g transform="translate(0,{top - 14})">{pane(W, 154, " languages ", "synced " + s["synced"])}</g>'
-    shown = sum(p for _, p, _ in s["langs"]) or 1
-    x, t = lx, 1.2
-    for name, pct, color in s["langs"]:
-        w = bw * pct / shown
-        dur = 0.15 + 0.5 * pct / shown
-        body += (f'<rect class="grow" style="animation-delay:{t:.2f}s;animation-duration:{dur:.2f}s" '
-                 f'x="{x:.1f}" y="{top + 30}" width="{max(w - 2, 1):.1f}" height="8" rx="1" fill="{color}"/>')
-        x, t = x + w, t + dur
-    for i, (name, pct, color) in enumerate(s["langs"]):
-        cx, cy = lx + (i % 3) * (bw / 3), top + 74 + (i // 3) * 30
-        body += (f'<g class="in" {at(1.3 + i * 0.1)}><rect x="{cx:.0f}" y="{cy - 9}" width="9" height="9" rx="1" fill="{color}"/>'
-                 f'<text x="{cx + 18:.0f}" y="{cy}" fill="{BODY}" font-size="14">{escape(name.lower())}'
-                 f'<tspan dx="10" fill="{MUTED}">{pct:.1f}%</tspan></text></g>')
-    label = (f"GitHub stats, last 12 months: {s['contributions']} contributions, {s['commits']} commits, "
-             f"{s['prs']} pull requests, {s['repos']} public repos, {s['stars']} stars. "
-             f"Current streak {s['current']} days, longest {s['longest']} days. Languages: "
-             + ", ".join(f"{n} {p:.0f}%" for n, p, _ in s["langs"]) + f". Synced {s['synced']}.")
-    write_svg("stats.svg", W, H, label, body)
+
+def render_stats(s):
+    ASSETS.mkdir(parents=True, exist_ok=True)
+    for theme in GLASS:
+        (ASSETS / f"stats-{theme}.svg").write_text(stats_svg(s, theme), encoding="utf-8")
 
 
 # ---------- last played from Last.fm ----------
@@ -453,61 +249,39 @@ def fetch_music(key):
     return m
 
 
-def music_svg(m):
+def music_svg(m, theme="sunset"):
     """The card as markup; api/music.py serves this live."""
-    W, H, X, A, R = 840, 188, 182, 120, 580  # A: art size, X: track column, R: this-week column
-    body = pane(W, H, " now playing " if m["playing"] else " last played ", "last.fm")
+    t = GLASS.get(theme, GLASS["sunset"])
+    W, A, Y = 840, 108, 26  # A: art size, Y: art top
+    X, R = 26 + A + 24, 600  # track column, this-week column
 
-    # art (or a placeholder) fades in first, then the command types beside it
-    body += f'<g class="in" {at(0.3)}>'
     if m["art"]:
-        body += (f'<clipPath id="art"><rect x="34" y="40" width="{A}" height="{A}" rx="4"/></clipPath>'
-                 f'<image href="{m["art"]}" x="34" y="40" width="{A}" height="{A}" '
-                 f'preserveAspectRatio="xMidYMid slice" clip-path="url(#art)"/>')
+        body = (f'<clipPath id="art"><rect x="26" y="{Y}" width="{A}" height="{A}" rx="10"/></clipPath>'
+                f'<image href="{m["art"]}" x="26" y="{Y}" width="{A}" height="{A}" '
+                f'preserveAspectRatio="xMidYMid slice" clip-path="url(#art)"/>')
     else:
-        body += (f'<rect x="34" y="40" width="{A}" height="{A}" rx="4" fill="{HEAT[0]}"/>'
-                 f'<text x="{34 + A / 2}" y="{40 + A / 2 + 14}" text-anchor="middle" fill="{MUTED}" font-size="40">♪</text>')
-    body += f'<rect x="34" y="40" width="{A}" height="{A}" rx="4" fill="none" stroke="{LINE}"/></g>'
+        body = (f'<rect x="26" y="{Y}" width="{A}" height="{A}" rx="10" fill="{t["ink"]}" fill-opacity=".08"/>'
+                f'<text x="{26 + A / 2}" y="{Y + A / 2 + 13}" text-anchor="middle" fill="{t["muted"]}" font-size="36">♪</text>')
 
-    t = 0.5
-    cmd = "nowplaying --last"
-    body += typed(X, 58, cmd, t, per=0.035, size=13, fill=MUTED,
-                  prefix=f'<tspan fill="{GREEN}">$ </tspan>', prefix_len=2)
-    t += len(cmd) * 0.035 + 0.2
-
-    lines = [(92, 20, TEXT, ' font-weight="600"', clip(m["track"], 30)),
-             (116, 15, BODY, "", clip(m["artist"].lower(), 40))]
-    if m["album"]:
-        lines.append((138, 13.5, MUTED, "", "# " + clip(m["album"].lower(), 44)))
-    for i, (y, size, fill, extra, text) in enumerate(lines):
-        body += (f'<text class="in" {at(t + i * 0.12)} x="{X}" y="{y}" fill="{fill}" '
-                 f'font-size="{size}"{extra}>{escape(text)}</text>')
-    t += len(lines) * 0.12 + 0.1
-
-    # footer: equalizer bars while playing, otherwise how long ago
-    count = f'{m["scrobbles"]:,} scrobbles'
     if m["playing"]:
-        body += ('<style>.eq{transform-box:fill-box;transform-origin:bottom;'
-                 'animation:eq .9s ease-in-out infinite alternate}'
-                 '@keyframes eq{from{transform:scaleY(.25)}to{transform:scaleY(1)}}</style>')
-        body += f'<g class="in" {at(t)}>'
         for i, d in enumerate((0, .3, .15, .45)):
-            body += (f'<rect class="eq" style="animation-delay:{d}s" x="{X + i * 5}" y="148" '
-                     f'width="3" height="12" rx="1" fill="{GREEN}"/>')
-        body += f'<text x="{X + 30}" y="160" fill="{MUTED}" font-size="13">· {count}</text></g>'
+            body += (f'<rect class="eq" style="animation-delay:{d}s" x="{X + i * 5}" y="42" '
+                     f'width="3" height="12" rx="1" fill="{t["accent"]}"/>')
+        body += f'<text x="{X + 28}" y="54" fill="{t["muted"]}" font-size="15" font-weight="500">Now playing</text>'
     else:
-        body += f'<text class="in" {at(t)} x="{X}" y="160" fill="{MUTED}" font-size="13">{m["ago"]}  ·  {count}</text>'
+        body += f'<text x="{X}" y="54" fill="{t["muted"]}" font-size="15" font-weight="500">Last played {m["ago"]}</text>'
+    body += (f'<text x="{X}" y="92" fill="{t["ink"]}" font-size="28" font-weight="700" letter-spacing="-0.5">'
+             f'{escape(clip(m["track"], 24))}</text>'
+             f'<text x="{X}" y="120" fill="{t["muted"]}" font-size="17" font-weight="500">{escape(clip(m["artist"], 34))}</text>')
 
-    # this week's top artists share the pane instead of adding another card
-    body += f'<line class="in" {at(0.4)} x1="{R - 20}" y1="40" x2="{R - 20}" y2="160" stroke="{LINE}"/>'
-    body += f'<text class="in" {at(0.5)} x="{R}" y="58" fill="{MUTED}" font-size="13"># top this week</text>'
+    # this week's top artists share the card instead of adding another one
+    body += f'<text x="{R}" y="54" fill="{t["muted"]}" font-size="15" font-weight="500">This week</text>'
     for i, (name, plays) in enumerate(m["top"]):
-        y, d = 92 + i * 24, 0.9 + i * 0.12
-        body += (f'<g class="in" {at(d)}><text x="{R}" y="{y}" fill="{MUTED}" font-size="14">{i + 1}</text>'
-                 f'<text x="{R + 20}" y="{y}" fill="{BODY}" font-size="14">{escape(clip(name.lower(), 18))}</text>'
-                 f'<text x="{W - 34}" y="{y}" text-anchor="end" fill="{TEXT}" font-size="14" font-weight="600">{plays}</text></g>')
+        y = 82 + i * 24
+        body += (f'<text x="{R}" y="{y}" fill="{t["ink"]}" font-size="16" font-weight="500">{escape(clip(name, 18))}</text>'
+                 f'<text x="{W - 32}" y="{y}" text-anchor="end" fill="{t["muted"]}" font-size="16" font-weight="500">{plays}</text>')
     if not m["top"]:
-        body += f'<text class="in" {at(0.9)} x="{R}" y="92" fill="{MUTED}" font-size="14">nothing yet</text>'
+        body += f'<text x="{R}" y="82" fill="{t["muted"]}" font-size="16" font-weight="500">Nothing yet</text>'
 
     verb = "Now playing" if m["playing"] else "Last played"
     label = f'{verb} on Spotify: {m["track"]} by {m["artist"]}'
@@ -515,21 +289,19 @@ def music_svg(m):
     label += f". {m['scrobbles']:,} scrobbles."
     if m["top"]:
         label += " Top this week: " + ", ".join(n for n, _ in m["top"]) + "."
-    return svg(W, H, label, body)
+    return glass_svg("music", theme, W, MUSIC_H, label, body)
 
 
-def music_offline_svg():
+def music_offline_svg(theme="sunset"):
     """Shown by the live endpoint when Last.fm can't be reached."""
-    W, H = 840, 188
-    body = pane(W, H, " last played ", "last.fm")
-    body += typed(34, 58, "nowplaying --last", 0.4, per=0.035, size=13, fill=MUTED,
-                  prefix=f'<tspan fill="{GREEN}">$ </tspan>', prefix_len=2)
-    body += (f'<text class="in" {at(1.2)} x="34" y="92" fill="{BODY}" font-size="15">'
-             f'# last.fm is taking a nap, back soon</text>')
-    return svg(W, H, "Last played on Spotify: Last.fm is unavailable right now.", body)
+    t = GLASS.get(theme, GLASS["sunset"])
+    body = (f'<text x="30" y="54" fill="{t["muted"]}" font-size="15" font-weight="500">Last played</text>'
+            f'<text x="30" y="92" fill="{t["ink"]}" font-size="26" font-weight="700" letter-spacing="-0.5">'
+            f'Last.fm is taking a nap, back soon</text>')
+    return glass_svg("music", theme, 840, MUSIC_H, "Last played on Spotify: Last.fm is unavailable right now.", body)
 
 
-def live_music(key):
+def live_music(key, theme="sunset"):
     """(svg, seconds Vercel's CDN may cache it). Failures get a short TTL so
     the real card comes back soon after Last.fm does."""
     try:
@@ -537,28 +309,22 @@ def live_music(key):
     except Exception as e:  # any failure should still produce an image, not a 500
         print(f"last.fm failed: {e!r}")
         m = None
-    return (music_svg(m), 60) if m else (music_offline_svg(), 10)
+    return (music_svg(m, theme), 60) if m else (music_offline_svg(theme), 10)
 
 
-def render_music(m):
+def render_music(m, theme="sunset"):
     ASSETS.mkdir(parents=True, exist_ok=True)
-    (ASSETS / "music.svg").write_text(music_svg(m), encoding="utf-8")
+    (ASSETS / "music.svg").write_text(music_svg(m, theme), encoding="utf-8")
 
 
 if __name__ == "__main__":
-    targets = sys.argv[1:] or ["static", "stats", "music"]
-    if "static" in targets:
-        render_hero()
-        render_projects()
-        render_stack()
-        render_contact()
-        render_live()
+    targets = sys.argv[1:] or ["stats", "music"]
     if "stats" in targets:
         token = os.environ.get("STATS_TOKEN") or os.environ.get("GITHUB_TOKEN")
         if token:
             render_stats(fetch_stats(token))
         else:
-            print("no STATS_TOKEN/GITHUB_TOKEN set, skipped stats.svg")
+            print("no STATS_TOKEN/GITHUB_TOKEN set, skipped stats")
     if "music" in targets:
         key = os.environ.get("LASTFM_API_KEY")
         music = fetch_music(key) if key else None

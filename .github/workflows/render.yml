@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ["cards/render.py", ".github/workflows/render.yml"]
+    paths: ["cards/render.py", "cards/scene.py", "cards/fonts/**", "cards/bg-*.jpg", ".github/workflows/render.yml"]
 
 permissions:
   contents: write
@@ -30,7 +30,7 @@ jobs:
         env:
           STATS_TOKEN: ${{ secrets.STATS_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # stats.svg lives on an orphan `output` branch that's force-pushed as a
+      # the stats cards live on an orphan `output` branch that's force-pushed as a
       # single commit, so refreshes never pile up in main's history. If the
       # render above fails this step is skipped and the old card stays up
       - name: Publish stats to output branch
@@ -38,11 +38,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           out=$(mktemp -d)
-          cp assets/stats.svg "$out/"
+          cp assets/stats-*.svg "$out/"
           cd "$out"
           git init -q -b output
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add stats.svg
+          git add stats-*.svg
           git commit -q -m "chore: refresh profile stats"
           git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" output

@@ -86,16 +86,15 @@ class Render(unittest.TestCase):
 
     def test_last_played(self):
         s = self.svg()
-        self.assertIn(" last played ", s)
-        self.assertIn("11h ago", s)
-        self.assertIn("111,507 scrobbles", s)
-        self.assertIn("# in between dreams", s)
+        self.assertIn("Last played 11h ago", s)
+        self.assertIn("111,507 scrobbles", s)  # aria-label only
+        self.assertIn("from In Between Dreams", s)
         self.assertIn("♪", s)  # no art -> placeholder
         self.assertNotIn('class="eq"', s)
 
     def test_now_playing(self):
         s = self.svg(playing=True, ago=None)
-        self.assertIn(" now playing ", s)
+        self.assertIn(">Now playing<", s)
         self.assertIn('class="eq"', s)
         self.assertIn('aria-label="Now playing on Spotify', s)
 
@@ -113,19 +112,19 @@ class Render(unittest.TestCase):
     def test_long_title_clipped(self):
         s = self.svg(track="x" * 200)
         # visible line is cut; the aria-label keeps the full title on purpose
-        self.assertIn(">" + "x" * 29 + "…</text>", s)
+        self.assertIn(">" + "x" * 23 + "…</text>", s)
 
     def test_top_artists_column(self):
         s = self.svg()
-        self.assertIn("# top this week", s)
-        self.assertIn("she &amp; him", s)
+        self.assertIn(">This week<", s)
+        self.assertIn(">She &amp; Him<", s)
         self.assertIn(">42</text>", s)
-        self.assertIn("men i trust", s)
+        self.assertIn(">Men I Trust<", s)
         self.assertIn("Top this week: She &amp; Him, Clairo, Men I Trust", s)  # aria-label
 
     def test_top_artists_empty(self):
         s = self.svg(top=[])
-        self.assertIn("nothing yet", s)
+        self.assertIn("Nothing yet", s)
         self.assertNotIn("Top this week:", s)
 
     def test_long_artist_in_top_clipped(self):
@@ -174,8 +173,40 @@ class Live(unittest.TestCase):
     def test_offline_card(self):
         out = render.music_offline_svg()
         self.assertTrue(out.startswith("<svg"))
-        self.assertIn("last.fm is taking a nap", out)
-        self.assertIn('width="840" height="188"', out)
+        self.assertIn("Last.fm is taking a nap", out)
+        self.assertIn('width="840" height="160"', out)
+
+
+class Themes(unittest.TestCase):
+    M = Live.M
+
+    def bg(self, slug, theme):
+        return render.inline(render.CARDS / f"bg-{slug}-{theme}.jpg", "image/jpeg")
+
+    def test_music_themes_use_their_own_lake_and_ink(self):
+        dark, light = render.music_svg(self.M, "sunset"), render.music_svg(self.M, "morning")
+        self.assertIn(self.bg("music", "sunset"), dark)
+        self.assertIn(self.bg("music", "morning"), light)
+        self.assertIn(render.GLASS["sunset"]["ink"], dark)
+        self.assertIn(render.GLASS["morning"]["ink"], light)
+
+    def test_unknown_theme_falls_back_to_sunset(self):
+        self.assertEqual(render.music_svg(self.M, "nope"), render.music_svg(self.M, "sunset"))
+        self.assertIn(self.bg("music", "sunset"), render.music_offline_svg("<script>"))
+
+    def test_font_is_inlined(self):
+        self.assertIn("font/woff2;base64,", render.music_svg(self.M))
+
+    def test_stats_card(self):
+        s = {"contributions": 2404, "commits": 2105, "current": 16, "longest": 55,
+             "recent": [0, 1, 2, 3, 4, 5, 9] * 52, "synced": "2026-11-16"}
+        for theme in render.GLASS:
+            out = render.stats_svg(s, theme)
+            self.assertIn(f'height="{render.STATS_H}"', out)
+            self.assertIn(">2,404<", out)
+            self.assertIn("Current streak 16 days, longest 55 days", out)
+            self.assertIn(self.bg("stats", theme), out)
+            self.assertEqual(out.count('height="11.5"'), 7 * 52)
 
 
 class Retry(unittest.TestCase):

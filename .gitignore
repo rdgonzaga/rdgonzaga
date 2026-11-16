@@ -1,5 +1,6 @@
-assets/stats.svg
+assets/stats*.svg
 assets/music.svg
 __pycache__/
 .vercel
 .env*
+cards/hero-frames/

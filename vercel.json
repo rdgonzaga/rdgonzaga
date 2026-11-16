@@ -3,7 +3,7 @@
   "functions": {
     "api/music.py": {
       "maxDuration": 15,
-      "excludeFiles": "{assets/**,cards/test_*.py,**/__pycache__/**}"
+      "excludeFiles": "{assets/**,cards/scene.py,cards/fonts/*.ttf,cards/bg-stats-*.jpg,cards/test_*.py,**/__pycache__/**}"
     }
   }
 }
